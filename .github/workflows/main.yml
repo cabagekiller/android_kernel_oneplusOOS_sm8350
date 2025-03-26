@@ -57,17 +57,17 @@ jobs:
         run: |
           echo "Setting up AOSP Clang toolchain..."
           # --- Select AOSP Clang Version ---
-          # Find recent stable versions/tags at:
+          # Find recent stable versions/tags/branches at:
           # https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+refs
-          # Example using clang-r510928 (check for newer stable ones if desired)
-          AOSP_CLANG_BRANCH="clang-r547379"
+          # Cloning a known branch like 'android14-release' is more reliable than specific tags.
+          AOSP_CLANG_BRANCH="android14-release" # Or try "main" or other androidNN-release branches
           # --- End Selection ---
 
           AOSP_CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86"
           CLANG_DIR="$HOME/toolchain/aosp-clang" # Install location
 
           echo "Cloning AOSP Clang branch $AOSP_CLANG_BRANCH..."
-          # Shallow clone only the specific version branch/tag for speed
+          # Shallow clone only the specific branch
           git clone --depth=1 --branch $AOSP_CLANG_BRANCH $AOSP_CLANG_URL $CLANG_DIR
 
           if [ ! -d "$CLANG_DIR/bin" ]; then
@@ -81,9 +81,6 @@ jobs:
           echo "AOSP Clang setup complete. PATH updated."
           # Verify clang command works
           clang --version
-
-      # NOTE: You can also remove the CLANG_URL variable from the main 'env:' block
-      # at the top of the workflow, as it's no longer used by this step.
       # 4. Clone Required Repositories
       - name: Clone Required Repositories
         working-directory: ${{ env.BUILD_DIR }}
