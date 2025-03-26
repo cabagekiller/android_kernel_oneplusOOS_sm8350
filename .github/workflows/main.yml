@@ -58,27 +58,28 @@ jobs:
           echo "Setting up AOSP Clang toolchain..."
           AOSP_CLANG_BRANCH="android14-release" # Keep using this branch
           AOSP_CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86"
-          CLANG_DIR="$HOME/toolchain/aosp-clang"
+          # CLANG_ROOT is the base directory where the repo is cloned
+          CLANG_ROOT="$HOME/toolchain/aosp-clang"
+          # CLANG_DIR points to the actual toolchain binaries inside CLANG_ROOT
+          # Assuming 'clang-stable' is the desired subdir based on 'ls' output from previous run
+          CLANG_DIR="$CLANG_ROOT/clang-stable"
 
           echo "Cloning AOSP Clang branch $AOSP_CLANG_BRANCH (Shallow Clone)..."
-          # Clone the specific branch - ADDING --depth=1 BACK to save space
-          git clone --depth=1 --branch $AOSP_CLANG_BRANCH $AOSP_CLANG_URL $CLANG_DIR
+          # Clone the specific branch with --depth=1
+          git clone --depth=1 --branch $AOSP_CLANG_BRANCH $AOSP_CLANG_URL $CLANG_ROOT
 
-          # Add ls command here for debugging output AFTER the clone attempt
-          echo "Listing contents of cloned directory ($CLANG_DIR):"
-          ls -la "$CLANG_DIR"
+          echo "Listing contents of cloned directory ($CLANG_ROOT):"
+          ls -la "$CLANG_ROOT"
 
-          # Check if the bin directory exists AFTER cloning
+          # Check if the EXPECTED toolchain subdirectory ('clang-stable') and its 'bin' exist
           if [ ! -d "$CLANG_DIR/bin" ]; then
-            echo "Error: AOSP Clang 'bin' directory not found inside $CLANG_DIR after shallow clone."
-            # Add more debug info if bin is missing
-            echo "Listing available top-level directories in $CLANG_DIR:"
-            find "$CLANG_DIR" -maxdepth 1 -type d -ls || echo "(find command failed)"
+            echo "Error: Expected Clang 'bin' directory not found inside $CLANG_DIR."
+            echo "Check the 'ls' output above to see available clang-* subdirectories and adjust CLANG_DIR if needed."
             exit 1
           fi
 
-          echo "AOSP Clang Directory: $CLANG_DIR"
-          # Add toolchain bin directory to the GitHub Actions PATH
+          echo "Using AOSP Clang from: $CLANG_DIR"
+          # Add the specific toolchain's bin directory to the GitHub Actions PATH
           echo "$CLANG_DIR/bin" >> $GITHUB_PATH
           echo "AOSP Clang setup complete. PATH updated."
           # Verify clang command works
