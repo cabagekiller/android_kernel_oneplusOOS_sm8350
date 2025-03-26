@@ -24,7 +24,6 @@ jobs:
     env:
       # --- Configurable Build Variables ---
       DEFCONFIG: vendor/kona-perf_defconfig
-      CLANG_URL: "https://github.com/kdrag0n/proton-clang/archive/refs/heads/master.zip"
 
       # --- Build Environment ---
       ARCH: arm64
@@ -53,20 +52,38 @@ jobs:
             bc bison build-essential cpio curl flex git kmod libssl-dev libelf-dev \
             make wget zip unzip python3 python-is-python3 lld llvm patch
 
-      # 3. Set up Clang Toolchain
-      - name: Set up Clang Toolchain
+      # 3. Set up Clang Toolchain (Using AOSP Clang)
+      - name: Set up Clang Toolchain (AOSP)
         run: |
-          echo "Setting up Clang toolchain..."
-          mkdir -p $HOME/toolchain
-          wget -q $CLANG_URL -O $HOME/clang.zip
-          unzip -q $HOME/clang.zip -d $HOME/toolchain
-          CLANG_DIR=$(find $HOME/toolchain -maxdepth 1 -mindepth 1 -type d)
-          if [ -z "$CLANG_DIR" ]; then echo "Error: Could not find extracted Clang directory."; exit 1; fi
-          echo "Clang Directory: $CLANG_DIR"
+          echo "Setting up AOSP Clang toolchain..."
+          # --- Select AOSP Clang Version ---
+          # Find recent stable versions/tags at:
+          # https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+refs
+          # Example using clang-r510928 (check for newer stable ones if desired)
+          AOSP_CLANG_BRANCH="clang-r510928"
+          # --- End Selection ---
+
+          AOSP_CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86"
+          CLANG_DIR="$HOME/toolchain/aosp-clang" # Install location
+
+          echo "Cloning AOSP Clang branch $AOSP_CLANG_BRANCH..."
+          # Shallow clone only the specific version branch/tag for speed
+          git clone --depth=1 --branch $AOSP_CLANG_BRANCH $AOSP_CLANG_URL $CLANG_DIR
+
+          if [ ! -d "$CLANG_DIR/bin" ]; then
+            echo "Error: Failed to clone or find AOSP Clang bin directory at $CLANG_DIR/bin."
+            exit 1
+          fi
+
+          echo "AOSP Clang Directory: $CLANG_DIR"
+          # Add toolchain bin directory to the GitHub Actions PATH
           echo "$CLANG_DIR/bin" >> $GITHUB_PATH
-          echo "Clang setup complete."
+          echo "AOSP Clang setup complete. PATH updated."
+          # Verify clang command works
           clang --version
 
+      # NOTE: You can also remove the CLANG_URL variable from the main 'env:' block
+      # at the top of the workflow, as it's no longer used by this step.
       # 4. Clone Required Repositories
       - name: Clone Required Repositories
         working-directory: ${{ env.BUILD_DIR }}
