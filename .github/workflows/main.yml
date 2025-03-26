@@ -146,6 +146,10 @@ jobs:
       # 7. Apply Custom Configs (Using echo)
       # Ensure this '-' aligns with Step 6's '-'
       - name: Apply Custom Configs (Using echo)
+        env:
+          # Correct the DEFCONFIG value
+          DEFCONFIG: gki_defconfig
+          ARCH: arm64
         # Ensure 'working-directory' and 'run' are indented (e.g., 2 spaces)
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
@@ -197,27 +201,7 @@ jobs:
             echo "Finished modifying $BUILD_CONFIG_PATH."
           fi
 
-          # --- WORKAROUND: Disable missing CONFIG_SCHED_ASSIST ---
-          # Construct the correct path (ensure this line is indented within the script)
-          TARGET_DEFCONFIG_PATH="arch/${ARCH}/configs/${DEFCONFIG}"
-
-          echo "Attempting to disable CONFIG_SCHED_ASSIST in target defconfig: $TARGET_DEFCONFIG_PATH"
-          # Ensure this 'if' is indented within the script
-          if [ -f "$TARGET_DEFCONFIG_PATH" ]; then
-              # Ensure commands inside 'if' are indented further (shell style)
-              echo "Disabling CONFIG_SCHED_ASSIST=y in $TARGET_DEFCONFIG_PATH..."
-              sed -i 's/^\(CONFIG_SCHED_ASSIST=y\)/# \1/g' "$TARGET_DEFCONFIG_PATH"
-              echo "--- Debug: Check defconfig content after sed ---"
-              grep "SCHED_ASSIST" "$TARGET_DEFCONFIG_PATH" || echo "(CONFIG_SCHED_ASSIST line not found in file)"
-              echo "--- End Debug ---"
-              echo "Finished attempting to disable CONFIG_SCHED_ASSIST."
-          else
-              # Ensure commands inside 'else' are indented further (shell style)
-              echo "Error: Target defconfig file '$TARGET_DEFCONFIG_PATH' not found. Cannot disable SCHED_ASSIST."
-              exit 1
-          # Ensure this 'fi' aligns with its 'if' (shell style)
-          fi
-          # --- End of WORKAROUND ---
+         
 
       - name: Create Sched Assist Config Fragment
         run: |
