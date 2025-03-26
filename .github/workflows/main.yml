@@ -147,17 +147,26 @@ jobs:
       - name: Apply Custom Configs (Using echo)
         working-directory: ${{ env.KERNEL_DIR }} # Run from kernel root
         run: |
-          # Ensure shell commands are indented correctly under 'run:'
           set -euxo pipefail
           echo "Applying custom kernel config options using echo..."
-          GKI_DEFCONFIG_PATH="./arch/arm64/configs/gki_defconfig"
-          BUILD_CONFIG_PATH="./build.config.gki"
+          GKI_DEFCONFIG_PATH="./common/arch/arm64/configs/gki_defconfig"
+          BUILD_CONFIG_PATH="./common/build.config.gki"
+          # --- Construct path to the actual defconfig file being used ---
+          # Handles DEFCONFIG potentially being 'vendor/foo' or just 'foo' relative to arch/arm64/configs
+          if [[ "${DEFCONFIG}" == *"/"* ]]; then
+             # Assumes path like vendor/kona-perf_defconfig is relative to kernel root
+             TARGET_DEFCONFIG_PATH="${DEFCONFIG}"
+          else
+             # Assumes path like kona-perf_defconfig is relative to arch/arm64/configs
+             TARGET_DEFCONFIG_PATH="arch/${ARCH}/configs/${DEFCONFIG}"
+          fi
 
+          # --- Modify GKI Defconfig (as before) ---
           if [ ! -f "$GKI_DEFCONFIG_PATH" ]; then
-            echo "Warning: $GKI_DEFCONFIG_PATH not found. Skipping config appends."
+            echo "Warning: $GKI_DEFCONFIG_PATH not found. Skipping appends."
           else
             echo "Appending configs to $GKI_DEFCONFIG_PATH..."
-            # Append each config line individually using echo >>
+            # (Keep your existing echo commands here for gki_defconfig)
             echo "CONFIG_KSU=y" >> $GKI_DEFCONFIG_PATH
             echo "CONFIG_KSU_SUSFS=y" >> $GKI_DEFCONFIG_PATH
             echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> $GKI_DEFCONFIG_PATH
@@ -182,11 +191,10 @@ jobs:
             echo "CONFIG_IP_NF_TARGET_TTL=y" >> $GKI_DEFCONFIG_PATH
             echo "CONFIG_IP6_NF_TARGET_HL=y" >> $GKI_DEFCONFIG_PATH
             echo "CONFIG_IP6_NF_MATCH_HL=y" >> $GKI_DEFCONFIG_PATH
-            # --- End of appends ---
             echo "Finished appending configs to $GKI_DEFCONFIG_PATH."
-            echo "NOTE: Ensure $DEFCONFIG incorporates these changes if relevant."
           fi
 
+          # --- Modify Build Config (as before) ---
           if [ ! -f "$BUILD_CONFIG_PATH" ]; then
             echo "Warning: $BUILD_CONFIG_PATH not found. Skipping sed command."
           else
@@ -195,6 +203,17 @@ jobs:
             echo "Finished modifying $BUILD_CONFIG_PATH."
           fi
 
+          # --- WORKAROUND: Disable missing CONFIG_SCHED_ASSIST in the target defconfig ---
+          echo "Attempting to disable CONFIG_SCHED_ASSIST in target defconfig: $TARGET_DEFCONFIG_PATH"
+          if [ -f "$TARGET_DEFCONFIG_PATH" ]; then
+              echo "Disabling CONFIG_SCHED_ASSIST=y in $TARGET_DEFCONFIG_PATH..."
+              # Use sed to comment out the line. Handles if it's already commented. Safe if line doesn't exist.
+              sed -i 's/^\(CONFIG_SCHED_ASSIST=y\)/# \1/g' "$TARGET_DEFCONFIG_PATH"
+              echo "Finished attempting to disable CONFIG_SCHED_ASSIST."
+          else
+              echo "Warning: Target defconfig file $TARGET_DEFCONFIG_PATH not found. Cannot disable SCHED_ASSIST."
+              # Consider failing if this is critical: exit 1
+          fi
 
       # 9. Configure Kernel (make defconfig)
       - name: Configure Kernel (make defconfig)
