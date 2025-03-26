@@ -1,0 +1,301 @@
+# .github/workflows/build-kernel.yml
+
+name: Kernel Build and Release
+
+# Controls when the workflow will run
+on:
+  # Triggers the workflow on push events for the 'main' branch
+  push:
+    branches: [ main ]
+    # Also trigger on pushing tags (e.g., v1.0, v2.0-beta)
+    tags: [ 'v*' ]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  build-kernel:
+    name: Build Kernel with Clang, KernelSU, and SUSFS
+    runs-on: ubuntu-latest
+    # Permissions needed to read code and create releases/tags
+    permissions:
+      contents: write
+
+    env:
+      # --- Configurable Build Variables ---
+      DEFCONFIG: vendor/kona-perf_defconfig
+      CLANG_URL: "https://github.com/kdrag0n/proton-clang/archive/refs/heads/master.zip"
+
+      # --- Build Environment ---
+      ARCH: arm64
+      SUBARCH: arm64
+      KERNEL_DIR: ${{ github.workspace }} # Main kernel source directory
+      BUILD_DIR: ${{ github.workspace }}  # Directory for cloning & packaging
+      CLANG_TRIPLE: aarch64-linux-gnu-
+      CROSS_COMPILE: aarch64-linux-gnu-
+      KBUILD_BUILD_USER: "GitHubActions"
+      KBUILD_BUILD_HOST: "github.com"
+      # KSUVER will be set by Setup KernelSU step
+      # CURRENT_TIMESTAMP and zip_name will be set by release steps
+
+    steps:
+      # 1. Checkout Kernel Source
+      - name: Checkout Kernel Source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1 # Fetch only last commit unless history is needed
+
+      # 2. Install Dependencies
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential cpio curl flex git kmod libssl-dev libelf-dev \
+            make wget zip unzip python3 python-is-python3 lld llvm patch
+
+      # 3. Set up Clang Toolchain
+      - name: Set up Clang Toolchain
+        run: |
+          echo "Setting up Clang toolchain..."
+          mkdir -p $HOME/toolchain
+          wget -q $CLANG_URL -O $HOME/clang.zip
+          unzip -q $HOME/clang.zip -d $HOME/toolchain
+          CLANG_DIR=$(find $HOME/toolchain -maxdepth 1 -mindepth 1 -type d)
+          if [ -z "$CLANG_DIR" ]; then echo "Error: Could not find extracted Clang directory."; exit 1; fi
+          echo "Clang Directory: $CLANG_DIR"
+          echo "$CLANG_DIR/bin" >> $GITHUB_PATH
+          echo "Clang setup complete."
+          clang --version
+
+      # 4. Clone Required Repositories
+      - name: Clone Required Repositories
+        working-directory: ${{ env.BUILD_DIR }}
+        run: |
+          set -euxo pipefail
+          echo "Cloning AnyKernel3..."
+          git clone --recursive https://github.com/TheWildJames/AnyKernel3.git -b gki AnyKernel3
+          echo "Cloning susfs4ksu..."
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-6.1 susfs4ksu
+          echo "Cloning kernel_patches..."
+          git clone https://github.com/cabagekiller/kernel_patches.git kernel_patches
+          echo "Finished cloning required repositories."
+
+      # 5. Setup KernelSU
+      - name: Setup KernelSU
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          set -euxo pipefail
+          echo "Running KernelSU setup script..."
+          curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s next-susfs-dev
+          echo "Updating git submodules..."
+          git submodule update --init --recursive
+          if [ ! -d "KernelSU-Next/kernel" ]; then echo "Error: KernelSU-Next/kernel directory not found."; exit 1; fi
+          echo "Calculating KSU version..."
+          cd KernelSU-Next/kernel
+          KSU_COMMIT_COUNT=$(/usr/bin/git rev-list --count HEAD)
+          if ! [[ "$KSU_COMMIT_COUNT" =~ ^[0-9]+$ ]]; then echo "Error: Failed to get valid KSU commit count."; exit 1; fi
+          KSU_VERSION=$(( KSU_COMMIT_COUNT + 10200 ))
+          echo "Calculated KSU_VERSION: $KSU_VERSION"
+          echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
+          sed -i "s/DKSU_VERSION=11998/DKSU_VERSION=${KSU_VERSION}/" Makefile
+          echo "KernelSU setup finished."
+          cd ${{ env.KERNEL_DIR }}
+
+      # 6. Setup SUSFS
+      - name: Setup SUSFS
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          set -euxo pipefail
+          echo "Setting up SUSFS..."
+          SUSFS_PATCHES="./susfs4ksu/kernel_patches"
+          KERNEL_PATCHES="./kernel_patches"
+          KSU_NEXT="KernelSU-Next"
+          if [ ! -d "$SUSFS_PATCHES" ] || [ ! -d "$KERNEL_PATCHES" ] || [ ! -d "$KSU_NEXT" ]; then echo "Error: Required patch/KSU directories not found."; ls -la .; exit 1; fi
+          echo "Copying SUSFS files..."
+          mkdir -p ./fs ./include/linux
+          cp "${SUSFS_PATCHES}/fs/"* ./fs/
+          cp "${SUSFS_PATCHES}/include/linux/"* ./include/linux/
+          cp "${SUSFS_PATCHES}/50_add_susfs_in_gki-android14-6.1.patch" ./
+          cp "${KERNEL_PATCHES}/69_hide_stuff.patch" ./
+          cp "${KERNEL_PATCHES}/next/syscall_hooks.patch" ./
+          cp "${KERNEL_PATCHES}/bbrv3_full.patch" ./
+          echo "Applying patches to ...."
+          patch -p1 -F 3 < bbrv3_full.patch || true
+          patch -p1 --forward < syscall_hooks.patch || echo "Warning: syscall_hooks.patch failed or already applied."
+          patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch || echo "Warning: SUSFS GKI patch failed or already applied."
+          patch -p1 -F 3 < 69_hide_stuff.patch || echo "Warning: 69_hide_stuff.patch failed or already applied."
+          echo "SUSFS setup finished."
+
+      # 7. Apply Custom Configs (Using echo)
+      - name: Apply Custom Configs (Using echo)
+        working-directory: ${{ env.KERNEL_DIR }} # Run from kernel root
+        run: |
+          # Ensure shell commands are indented correctly under 'run:'
+          set -euxo pipefail
+          echo "Applying custom kernel config options using echo..."
+          GKI_DEFCONFIG_PATH="./arch/arm64/configs/gki_defconfig"
+          BUILD_CONFIG_PATH="./build.config.gki"
+
+          if [ ! -f "$GKI_DEFCONFIG_PATH" ]; then
+            echo "Warning: $GKI_DEFCONFIG_PATH not found. Skipping config appends."
+          else
+            echo "Appending configs to $GKI_DEFCONFIG_PATH..."
+            # Append each config line individually using echo >>
+            echo "CONFIG_KSU=y" >> $GKI_DEFCONFIG_PATH
+            echo "CONFIG_KSU_SUSFS=y" >> $GKI_DEFCONFIG_PATH
+            echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> $GKI_DEFCONFIG_PATH
+            echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> $GKI_DEFCONFIG_PATH
+            echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> $GKI_DEFCONFIG_PATH
+            echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> $GKI_DEFCONFIG_PATH
+            echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> $GKI_DEFCONFIG_PATH
+            echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> $GKI_DEFCONFIG_PATH
+            echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y" >> $GKI_DEFCONFIG_PATH
+            echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> $GKI_DEFCONFIG_PATH
+            echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> $GKI_DEFCONFIG_PATH
+            echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> $GKI_DEFCONFIG_PATH
+            echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> $GKI_DEFCONFIG_PATH
+            echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> $GKI_DEFCONFIG_PATH
+            echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> $GKI_DEFCONFIG_PATH
+            echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> $GKI_DEFCONFIG_PATH
+            echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> $GKI_DEFCONFIG_PATH
+            echo "CONFIG_KSU_WITH_KPROBES=n" >> $GKI_DEFCONFIG_PATH
+            echo "CONFIG_COMPAT=y" >> $GKI_DEFCONFIG_PATH
+            echo "CONFIG_TMPFS_XATTR=y" >> $GKI_DEFCONFIG_PATH
+            echo "CONFIG_TMPFS_POSIX_ACL=y" >> $GKI_DEFCONFIG_PATH
+            echo "CONFIG_IP_NF_TARGET_TTL=y" >> $GKI_DEFCONFIG_PATH
+            echo "CONFIG_IP6_NF_TARGET_HL=y" >> $GKI_DEFCONFIG_PATH
+            echo "CONFIG_IP6_NF_MATCH_HL=y" >> $GKI_DEFCONFIG_PATH
+            # --- End of appends ---
+            echo "Finished appending configs to $GKI_DEFCONFIG_PATH."
+            echo "NOTE: Ensure $DEFCONFIG incorporates these changes if relevant."
+          fi
+
+          if [ ! -f "$BUILD_CONFIG_PATH" ]; then
+            echo "Warning: $BUILD_CONFIG_PATH not found. Skipping sed command."
+          else
+            echo "Modifying $BUILD_CONFIG_PATH..."
+            sed -i '2s/check_defconfig//' $BUILD_CONFIG_PATH
+            echo "Finished modifying $BUILD_CONFIG_PATH."
+          fi
+
+      # 8. Clean Build Artifacts
+      - name: Clean Build Artifacts
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          make O=out mrproper
+          echo "Cleaned previous build artifacts."
+
+      # 9. Configure Kernel (make defconfig)
+      - name: Configure Kernel (make defconfig)
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          echo "Configuring kernel using DEFCONFIG=${{ env.DEFCONFIG }}..."
+          make O=out \
+               ARCH=$ARCH \
+               SUBARCH=$SUBARCH \
+               CC=clang \
+               LD=ld.lld \
+               AR=llvm-ar \
+               NM=llvm-nm \
+               OBJCOPY=llvm-objcopy \
+               OBJDUMP=llvm-objdump \
+               STRIP=llvm-strip \
+               CLANG_TRIPLE=$CLANG_TRIPLE \
+               CROSS_COMPILE=$CROSS_COMPILE \
+               HOSTCC=clang \
+               HOSTCXX=clang++ \
+               ${{ env.DEFCONFIG }}
+          echo "Kernel configuration complete (output in 'out/.config')."
+          grep "CONFIG_KSU=y" out/.config || echo "Warning: CONFIG_KSU not found or not set to 'y' in out/.config"
+
+      # 10. Compile Kernel
+      - name: Compile Kernel
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          echo "Starting kernel compilation..."
+          NPROC=$(nproc --all)
+          echo "Using $NPROC cores for compilation."
+          make O=out -j$NPROC \
+               ARCH=$ARCH \
+               SUBARCH=$SUBARCH \
+               CC=clang \
+               LD=ld.lld \
+               AR=llvm-ar \
+               NM=llvm-nm \
+               OBJCOPY=llvm-objcopy \
+               OBJDUMP=llvm-objdump \
+               STRIP=llvm-strip \
+               CLANG_TRIPLE=$CLANG_TRIPLE \
+               CROSS_COMPILE=$CROSS_COMPILE \
+               HOSTCC=clang \
+               HOSTCXX=clang++
+          echo "Kernel compilation finished."
+
+      # --- Release Steps ---
+      # These steps only run on manual trigger or tag push
+
+      # 11. Set Release Variables
+      - name: Set Release Variables
+        # Only run for manual triggers or tag pushes
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+        run: |
+          echo "CURRENT_TIMESTAMP=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
+          echo "Setting timestamp for release..."
+
+      # 12. Create ZIP Package (AnyKernel3)
+      - name: Create ZIP Package
+        # Only run for manual triggers or tag pushes
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+        working-directory: ${{ env.BUILD_DIR }}
+        run: |
+          set -euxo pipefail
+          KERNEL_IMAGE_PATH="${{ env.KERNEL_DIR }}/out/arch/${{ env.ARCH }}/boot/Image"
+          ANYKERNEL_DIR="AnyKernel3"
+
+          if [ ! -f "$KERNEL_IMAGE_PATH" ]; then echo "Error: Kernel Image not found at $KERNEL_IMAGE_PATH!"; exit 1; fi
+          if [ ! -d "$ANYKERNEL_DIR" ]; then echo "Error: $ANYKERNEL_DIR directory not found!"; exit 1; fi
+
+          echo "Copying Image to $ANYKERNEL_DIR..."
+          cp "$KERNEL_IMAGE_PATH" "$ANYKERNEL_DIR/Image"
+
+          # Add dtbo if it exists and is needed by AnyKernel3
+          # KERNEL_DTBO_PATH="${{ env.KERNEL_DIR }}/out/arch/${{ env.ARCH }}/boot/dtbo.img"
+          # if [ -f "$KERNEL_DTBO_PATH" ]; then echo "Copying dtbo.img to $ANYKERNEL_DIR..."; cp "$KERNEL_DTBO_PATH" "$ANYKERNEL_DIR/"; fi
+
+          cd "$ANYKERNEL_DIR"
+          # Create zip name including KSU version and timestamp
+          ZIP_NAME="CabageKernel-${{ env.DEFCONFIG }}-KSU${{ env.KSUVER }}-${{ env.CURRENT_TIMESTAMP }}.zip"
+          echo "Creating zip file $ZIP_NAME..."
+          # Zip contents of current dir (-r9 for compression, exclude .git files)
+          zip -r9 "../$ZIP_NAME" . -x ".git*"
+          echo "Verifying zip file..."
+          ls -lh "../$ZIP_NAME"
+          cd ..
+          # Export zip_name for the next step
+          echo "zip_name=$ZIP_NAME" >> $GITHUB_ENV
+          echo "Zip package created."
+
+      # 13. Create Release
+      - name: Create Release
+        # Only run for manual triggers or tag pushes
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Provided by Actions, no need to create a secret
+        with:
+          files: ${{ env.BUILD_DIR }}/${{ env.zip_name }} # Path to the zip file
+          # Use the Git tag itself if this was triggered by a tag push, otherwise use a timestamp tag
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('release-{0}', env.CURRENT_TIMESTAMP) }}
+          name: Kernel Release ${{ github.ref_type == 'tag' && github.ref_name || env.CURRENT_TIMESTAMP }}
+          body: |
+            **Device:** ${{ env.DEFCONFIG }}
+            **Triggered by:** ${{ github.event_name }} (${{ github.ref_name }})
+            **KernelSU Version:** ${{ env.KSUVER }}
+            **Timestamp:** ${{ env.CURRENT_TIMESTAMP }}
+
+            Release automatically generated by GitHub Actions.
+          # Set draft: true if you want to manually review before publishing
+          # draft: false
+          # Set prerelease: true if this is not a stable release
+          # prerelease: false
