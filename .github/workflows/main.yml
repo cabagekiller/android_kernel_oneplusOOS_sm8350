@@ -218,6 +218,22 @@ jobs:
           # Ensure this 'fi' aligns with its 'if' (shell style)
           fi
           # --- End of WORKAROUND ---
+
+      - name: Create Sched Assist Config Fragment
+        run: |
+          # Define where to place the fragment (Adjust path if needed, using KERNEL_DIR)
+          FRAG_DIR="${{ env.KERNEL_DIR }}/arch/arm64/configs/local_defs"
+          FRAG_PATH="${FRAG_DIR}/sched_assist.config"
+
+          echo "Creating config fragment directory: $FRAG_DIR"
+          mkdir -p "$FRAG_DIR"
+
+          echo "Creating config fragment: $FRAG_PATH"
+          echo "CONFIG_SCHED_ASSIST=y" > "$FRAG_PATH"
+
+          echo "Fragment created."
+          # Export the fragment path for the config generation step
+          echo "EXTRA_DEFCONFIG_PATH=${FRAG_PATH}" >> $GITHUB_ENV
       # 9. Configure Kernel (make defconfig)
       - name: Configure Kernel (make defconfig)
         working-directory: ${{ env.KERNEL_DIR }}
