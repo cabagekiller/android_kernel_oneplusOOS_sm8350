@@ -90,7 +90,7 @@ jobs:
         run: |
           set -euxo pipefail
           echo "Cloning AnyKernel3..."
-          git clone --recursive https://github.com/TheWildJames/AnyKernel3.git -b gki AnyKernel3
+          git clone --recursive https://github.com/cabagekiller/AnyKernel3.git -b gki AnyKernel3
           echo "Cloning susfs4ksu..."
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-6.1 susfs4ksu
           echo "Cloning kernel_patches..."
