@@ -178,12 +178,6 @@ jobs:
             echo "Finished modifying $BUILD_CONFIG_PATH."
           fi
 
-      # 8. Clean Build Artifacts
-      - name: Clean Build Artifacts
-        working-directory: ${{ env.KERNEL_DIR }}
-        run: |
-          make O=out mrproper
-          echo "Cleaned previous build artifacts."
 
       # 9. Configure Kernel (make defconfig)
       - name: Configure Kernel (make defconfig)
