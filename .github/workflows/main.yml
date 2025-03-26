@@ -200,7 +200,32 @@ jobs:
             sed -i '2s/check_defconfig//' $BUILD_CONFIG_PATH
             echo "Finished modifying $BUILD_CONFIG_PATH."
           fi
+          # --- WORKAROUND: Comment out missing Kconfig source in init/Kconfig ---
+          INIT_KCONFIG_PATH="init/Kconfig"
+          # The exact line causing the error (needs escaping for sed)
+          BROKEN_SOURCE_LINE='source "kernel/sched_assist/Kconfig"'
+          # Escaped version for sed command
+          SED_PATTERN='^source "kernel/sched_assist/Kconfig"'
 
+          echo "Attempting to comment out broken source line in $INIT_KCONFIG_PATH..."
+          if [ -f "$INIT_KCONFIG_PATH" ]; then
+              # Check if the line exists and is not already commented out
+              if grep -q "${SED_PATTERN}" "$INIT_KCONFIG_PATH"; then
+                  echo "Commenting out '${BROKEN_SOURCE_LINE}' in $INIT_KCONFIG_PATH..."
+                  # Use sed to add '#' at the beginning of the specific source line
+                  sed -i "s|${SED_PATTERN}|# &|" "$INIT_KCONFIG_PATH"
+                  echo "--- Debug: Check init/Kconfig content after sed ---"
+                  grep "sched_assist" "$INIT_KCONFIG_PATH" || echo "(sched_assist line not found or already commented)"
+                  echo "--- End Debug ---"
+                  echo "Finished applying Kconfig workaround."
+              else
+                  echo "Line '${BROKEN_SOURCE_LINE}' already commented or not found. Skipping sed."
+              fi
+          else
+              echo "Error: $INIT_KCONFIG_PATH not found. Cannot apply workaround."
+              exit 1
+          fi
+          # --- End of WORKAROUND ---
          
 
       - name: Create Sched Assist Config Fragment
