@@ -152,8 +152,8 @@ jobs:
           # Ensure all lines below are indented further (e.g., 4 spaces total)
           set -euxo pipefail
           echo "Applying custom kernel config options using echo..."
-          GKI_DEFCONFIG_PATH="./common/arch/arm64/configs/gki_defconfig"
-          BUILD_CONFIG_PATH="./common/build.config.gki"
+          GKI_DEFCONFIG_PATH="./arch/arm64/configs/gki_defconfig"
+          BUILD_CONFIG_PATH="./build.config.gki"
 
           # --- Modify GKI Defconfig (as before) ---
           if [ ! -f "$GKI_DEFCONFIG_PATH" ]; then
