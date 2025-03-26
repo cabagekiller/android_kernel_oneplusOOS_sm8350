@@ -60,17 +60,20 @@ jobs:
           AOSP_CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86"
           CLANG_DIR="$HOME/toolchain/aosp-clang"
 
-          echo "Cloning AOSP Clang branch $AOSP_CLANG_BRANCH (Full Clone)..."
-          # Clone the specific branch - REMOVED --depth=1
-          git clone --branch $AOSP_CLANG_BRANCH $AOSP_CLANG_URL $CLANG_DIR
+          echo "Cloning AOSP Clang branch $AOSP_CLANG_BRANCH (Shallow Clone)..."
+          # Clone the specific branch - ADDING --depth=1 BACK to save space
+          git clone --depth=1 --branch $AOSP_CLANG_BRANCH $AOSP_CLANG_URL $CLANG_DIR
 
-          # Add ls command here for debugging output
+          # Add ls command here for debugging output AFTER the clone attempt
           echo "Listing contents of cloned directory ($CLANG_DIR):"
           ls -la "$CLANG_DIR"
 
           # Check if the bin directory exists AFTER cloning
           if [ ! -d "$CLANG_DIR/bin" ]; then
-            echo "Error: AOSP Clang 'bin' directory not found inside $CLANG_DIR after cloning."
+            echo "Error: AOSP Clang 'bin' directory not found inside $CLANG_DIR after shallow clone."
+            # Add more debug info if bin is missing
+            echo "Listing available top-level directories in $CLANG_DIR:"
+            find "$CLANG_DIR" -maxdepth 1 -type d -ls || echo "(find command failed)"
             exit 1
           fi
 
