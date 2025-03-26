@@ -60,7 +60,7 @@ jobs:
           # Find recent stable versions/tags at:
           # https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+refs
           # Example using clang-r510928 (check for newer stable ones if desired)
-          AOSP_CLANG_BRANCH="clang-r510928"
+          AOSP_CLANG_BRANCH="clang-r547379"
           # --- End Selection ---
 
           AOSP_CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86"
