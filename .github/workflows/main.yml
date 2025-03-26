@@ -200,27 +200,37 @@ jobs:
             sed -i '2s/check_defconfig//' $BUILD_CONFIG_PATH
             echo "Finished modifying $BUILD_CONFIG_PATH."
           fi
-          # --- WORKAROUND: Comment out missing Kconfig source in init/Kconfig ---
+          # --- WORKAROUND: Comment out missing Kconfig sources in init/Kconfig ---
           INIT_KCONFIG_PATH="init/Kconfig"
-          # The exact line causing the error (needs escaping for sed)
-          BROKEN_SOURCE_LINE='source "kernel/sched_assist/Kconfig"'
-          # Escaped version for sed command
-          SED_PATTERN='^source "kernel/sched_assist/Kconfig"'
+          # Define broken lines
+          BROKEN_SOURCE_LINE_1='source "kernel/sched_assist/Kconfig"'
+          BROKEN_SOURCE_LINE_2='source "kernel/tuning/Kconfig"'
+          # Define patterns for sed (safer than using variables in pattern)
+          SED_PATTERN_1='^source "kernel/sched_assist/Kconfig"'
+          SED_PATTERN_2='^source "kernel/tuning/Kconfig"'
 
-          echo "Attempting to comment out broken source line in $INIT_KCONFIG_PATH..."
+          echo "Attempting to comment out broken source lines in $INIT_KCONFIG_PATH..."
           if [ -f "$INIT_KCONFIG_PATH" ]; then
-              # Check if the line exists and is not already commented out
-              if grep -q "${SED_PATTERN}" "$INIT_KCONFIG_PATH"; then
-                  echo "Commenting out '${BROKEN_SOURCE_LINE}' in $INIT_KCONFIG_PATH..."
-                  # Use sed to add '#' at the beginning of the specific source line
-                  sed -i "s|${SED_PATTERN}|# &|" "$INIT_KCONFIG_PATH"
-                  echo "--- Debug: Check init/Kconfig content after sed ---"
-                  grep "sched_assist" "$INIT_KCONFIG_PATH" || echo "(sched_assist line not found or already commented)"
-                  echo "--- End Debug ---"
-                  echo "Finished applying Kconfig workaround."
+              # Comment out first line if needed
+              if grep -q "${SED_PATTERN_1}" "$INIT_KCONFIG_PATH"; then
+                  echo "Commenting out '${BROKEN_SOURCE_LINE_1}'..."
+                  sed -i "s|${SED_PATTERN_1}|# &|" "$INIT_KCONFIG_PATH"
               else
-                  echo "Line '${BROKEN_SOURCE_LINE}' already commented or not found. Skipping sed."
+                  echo "Line '${BROKEN_SOURCE_LINE_1}' already commented or not found."
               fi
+
+              # Comment out second line if needed
+              if grep -q "${SED_PATTERN_2}" "$INIT_KCONFIG_PATH"; then
+                  echo "Commenting out '${BROKEN_SOURCE_LINE_2}'..."
+                  sed -i "s|${SED_PATTERN_2}|# &|" "$INIT_KCONFIG_PATH"
+              else
+                  echo "Line '${BROKEN_SOURCE_LINE_2}' already commented or not found."
+              fi
+
+              echo "--- Debug: Check init/Kconfig content after sed ---"
+              grep -E "sched_assist|tuning" "$INIT_KCONFIG_PATH" || echo "(sched_assist/tuning lines not found or commented)"
+              echo "--- End Debug ---"
+              echo "Finished applying Kconfig workarounds."
           else
               echo "Error: $INIT_KCONFIG_PATH not found. Cannot apply workaround."
               exit 1
